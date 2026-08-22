@@ -21,3 +21,4 @@ Quick facts:
 - SDLC configuration: `.sdlc/config.json` (change it with `/shipshape-customize`,
   not by hand)
 # note
+# another note
