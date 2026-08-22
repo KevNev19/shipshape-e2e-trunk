@@ -20,3 +20,4 @@ Quick facts:
 - Project overview: `docs/sdlc/design.md`
 - SDLC configuration: `.sdlc/config.json` (change it with `/shipshape-customize`,
   not by hand)
+# note
