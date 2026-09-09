@@ -1,0 +1,37 @@
+name: Assurance permissions probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  checks: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect readable enforcement metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, subprocess
+          repo = os.environ["REPO"]
+          probes = {}
+          for path in [f"repos/{repo}/branches/main", f"repos/{repo}/branches/main/protection/required_status_checks", f"repos/{repo}/rules/branches/assurance-permissions", f"repos/{repo}/rulesets"]:
+              result = subprocess.run(["gh", "api", path], capture_output=True, text=True)
+              try:
+                  payload = json.loads(result.stdout)
+              except ValueError:
+                  payload = result.stdout
+              if path.endswith("/rulesets") and result.returncode == 0:
+                  for rule in payload:
+                      detail = subprocess.run(["gh", "api", f"repos/{repo}/rulesets/{rule['id']}"], capture_output=True, text=True)
+                      probes[f"ruleset-{rule['id']}"] = {"code": detail.returncode, "payload": json.loads(detail.stdout)}
+              probes[path] = {"code": result.returncode, "payload": payload, "stderr": result.stderr}
+          owner, name = repo.split("/")
+          query = 'query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name branchProtectionRule{requiresStrictStatusChecks requiresStatusChecks requiredStatusCheckContexts requiredStatusChecks{context app{databaseId slug}} isAdminEnforced}}}}'
+          result = subprocess.run(["gh","api","graphql","-f",f"query={query}","-f",f"owner={owner}","-f",f"name={name}"],capture_output=True,text=True)
+          probes["graphql-classic"] = {"code":result.returncode,"payload":json.loads(result.stdout),"stderr":result.stderr}
+          print(json.dumps(probes, indent=2))
+          PYTHON
