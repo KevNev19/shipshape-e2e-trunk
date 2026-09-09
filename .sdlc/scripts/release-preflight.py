@@ -410,7 +410,7 @@ def verify_workflow(
             path=expected_path,
         )
     endpoint = f"repos/{repository}/actions/workflows/{workflow_id}/runs"
-    fields = {"event": "push", "per_page": "100"}
+    fields = {"event": "push", "head_sha": candidate, "per_page": "100"}
     if filter_branch:
         fields["branch"] = head_branch
     runs = api.object_pages(endpoint, "workflow_runs", fields=fields)

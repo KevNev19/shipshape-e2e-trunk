@@ -53,6 +53,7 @@ jobs:
           candidate_sha="$(printf '%s' "$evidence" | python3 -c \
             'import json,sys; print(json.load(sys.stdin)["candidate_sha"])')"
           gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
             --target "$candidate_sha" \
             --generate-notes \
             --verify-tag
