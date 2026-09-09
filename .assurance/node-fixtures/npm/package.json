@@ -1,0 +1,15 @@
+{
+  "name": "assurance-npm",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "npm@10.8.2",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "node --test tests/smoke.test.js"
+  },
+  "dependencies": {
+    "local-library": "1.0.0"
+  }
+}

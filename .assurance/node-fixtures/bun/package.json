@@ -1,0 +1,15 @@
+{
+  "name": "assurance-bun",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "bun@1.2.20",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "node --test tests/smoke.test.js"
+  },
+  "dependencies": {
+    "local-library": "workspace:*"
+  }
+}

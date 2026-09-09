@@ -1,0 +1,15 @@
+{
+  "name": "assurance-yarn-modern",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "yarn@4.9.2",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "node --test tests/smoke.test.js"
+  },
+  "dependencies": {
+    "local-library": "workspace:*"
+  }
+}

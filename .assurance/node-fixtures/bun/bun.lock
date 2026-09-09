@@ -1,0 +1,18 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "assurance-bun",
+      "dependencies": {
+        "local-library": "workspace:*",
+      },
+    },
+    "packages/local-library": {
+      "name": "local-library",
+      "version": "1.0.0",
+    },
+  },
+  "packages": {
+    "local-library": ["local-library@workspace:packages/local-library"],
+  }
+}

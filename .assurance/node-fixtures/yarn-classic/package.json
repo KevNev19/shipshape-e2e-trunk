@@ -1,0 +1,15 @@
+{
+  "name": "assurance-yarn-classic",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "yarn@1.22.22",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "node --test tests/smoke.test.js"
+  },
+  "dependencies": {
+    "local-library": "1.0.0"
+  }
+}
