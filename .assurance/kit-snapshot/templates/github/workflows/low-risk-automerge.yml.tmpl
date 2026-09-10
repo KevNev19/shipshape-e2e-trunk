@@ -1,0 +1,330 @@
+# What this is: immediately merges ordinary documentation after fresh API-only
+# exact-head verification, without persistent authorization. Strict branch
+# rules narrow the final race; the REST API has no atomic base-SHA guard.
+# Safe to edit: yes — shipshape will ask before overwriting your edits.
+# managed-by: shipshape v{{KIT_VERSION}}
+name: Low-risk auto-merge
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
+      - labeled
+      - unlabeled
+      - ready_for_review
+      - converted_to_draft
+      - auto_merge_enabled
+  workflow_run:
+    workflows: ["CI", "Secret scan", "CodeQL"]
+    types: [completed]
+
+# The privileged path reads only API metadata and a helper from the target
+# branch at the event's fixed base SHA. It never checks out candidate content.
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: >-
+    low-risk-automerge-${{
+      github.event.pull_request.number ||
+      github.event.workflow_run.pull_requests[0].number ||
+      github.event.workflow_run.id
+    }}
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event_name == 'workflow_run' && github.event.action == 'completed' &&
+      (github.event.workflow_run.event == 'pull_request' ||
+      github.event.workflow_run.event == 'pull_request_target') &&
+      github.event.workflow_run.pull_requests[0].number)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select one pull request and trusted policy commit
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$GITHUB_EVENT_PATH" "$GH_REPO" "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import re
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          sha_re = re.compile(r"[0-9a-f]{40}")
+
+          def fail(message):
+              print(f"Selection denied: {message}")
+              raise SystemExit(1)
+
+
+          def api_get(path):
+              try:
+                  process = subprocess.run(
+                      [
+                          "gh",
+                          "api",
+                          "-H",
+                          "Accept: application/vnd.github+json",
+                          "-H",
+                          "X-GitHub-Api-Version: 2022-11-28",
+                          path,
+                      ],
+                      capture_output=True,
+                      text=True,
+                      timeout=30,
+                  )
+              except (OSError, subprocess.TimeoutExpired):
+                  fail("GitHub pull request metadata was unavailable")
+              if process.returncode != 0:
+                  fail("GitHub pull request metadata could not be read")
+              try:
+                  return json.loads(process.stdout)
+              except json.JSONDecodeError:
+                  fail("GitHub pull request metadata was malformed")
+
+
+          def repo_ref_matches(link, resolved):
+              return (
+                  isinstance(link, dict)
+                  and isinstance(resolved, dict)
+                  and type(link.get("id")) is int
+                  and link["id"] > 0
+                  and link.get("id") == resolved.get("id")
+                  and isinstance(link.get("name"), str)
+                  and bool(link["name"])
+                  and link.get("name") == resolved.get("name")
+                  and isinstance(link.get("url"), str)
+                  and bool(link["url"])
+                  and link.get("url") == resolved.get("url")
+              )
+
+
+          def pull_link_matches(link, resolved):
+              if not isinstance(link, dict) or not isinstance(resolved, dict):
+                  return False
+              link_head = link.get("head")
+              link_base = link.get("base")
+              resolved_head = resolved.get("head")
+              resolved_base = resolved.get("base")
+              return (
+                  type(link.get("id")) is int
+                  and link["id"] > 0
+                  and link.get("id") == resolved.get("id")
+                  and link.get("number") == resolved.get("number")
+                  and isinstance(link.get("url"), str)
+                  and bool(link["url"])
+                  and link.get("url") == resolved.get("url")
+                  and isinstance(link_head, dict)
+                  and isinstance(link_base, dict)
+                  and isinstance(resolved_head, dict)
+                  and isinstance(resolved_base, dict)
+                  and link_head.get("ref") == resolved_head.get("ref")
+                  and link_head.get("sha") == resolved_head.get("sha")
+                  and repo_ref_matches(link_head.get("repo"), resolved_head.get("repo"))
+                  and link_base.get("ref") == resolved_base.get("ref")
+                  and link_base.get("sha") == resolved_base.get("sha")
+                  and repo_ref_matches(link_base.get("repo"), resolved_base.get("repo"))
+              )
+
+
+          try:
+              event = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          except (OSError, json.JSONDecodeError):
+              fail("event payload was unavailable or malformed")
+          repository = event.get("repository") if isinstance(event, dict) else None
+          if (
+              not isinstance(repository, dict)
+              or repository.get("full_name") != sys.argv[2]
+              or type(repository.get("id")) is not int
+              or repository["id"] <= 0
+              or not isinstance(repository.get("name"), str)
+              or not repository["name"]
+              or not isinstance(repository.get("url"), str)
+              or not repository["url"]
+              or not isinstance(repository.get("default_branch"), str)
+              or not repository["default_branch"]
+          ):
+              fail("event repository did not match this repository")
+
+          run = event.get("workflow_run")
+          if isinstance(run, dict):
+              run_repository = run.get("repository")
+              if (
+                  event.get("action") != "completed"
+                  or not isinstance(run_repository, dict)
+                  or run_repository.get("full_name") != sys.argv[2]
+                  or not repo_ref_matches(run_repository, repository)
+              ):
+                  fail("workflow run was not a completion in this repository")
+              pulls = run.get("pull_requests")
+              if not isinstance(pulls, list) or len(pulls) != 1:
+                  fail("workflow run did not identify exactly one pull request")
+              pull = pulls[0]
+              workflow_run = run.get("id")
+          else:
+              pull = event.get("pull_request")
+              workflow_run = None
+          if not isinstance(pull, dict):
+              fail("pull request payload was unavailable")
+          number = pull.get("number")
+          if type(number) is not int or number <= 0:
+              fail("pull request identity was malformed")
+          resolved = api_get(f"repos/{sys.argv[2]}/pulls/{number}")
+          base = resolved.get("base") if isinstance(resolved, dict) else None
+          head = resolved.get("head") if isinstance(resolved, dict) else None
+          base_repository = base.get("repo") if isinstance(base, dict) else None
+          if (
+              isinstance(base, dict)
+              and base.get("ref") != repository["default_branch"]
+          ):
+              fail("trusted policy base was not the repository default branch")
+          if (
+              not pull_link_matches(pull, resolved)
+              or resolved.get("number") != number
+              or not isinstance(base, dict)
+              or not isinstance(head, dict)
+              or not isinstance(base_repository, dict)
+              or base_repository.get("full_name") != sys.argv[2]
+              or not repo_ref_matches(repository, base_repository)
+              or sha_re.fullmatch(base.get("sha", "")) is None
+              or sha_re.fullmatch(head.get("sha", "")) is None
+              or (
+                  workflow_run is not None
+                  and (type(workflow_run) is not int or workflow_run <= 0)
+              )
+          ):
+              fail("pull request identity, head, or base was malformed")
+          with Path(sys.argv[3]).open("a", encoding="utf-8") as output:
+              output.write(f"pr={number}\n")
+              output.write(f"trusted_sha={base['sha']}\n")
+              output.write(f"workflow_run={workflow_run or ''}\n")
+          PY
+
+      - name: Load review policy from the fixed trusted base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TRUSTED_SHA: ${{ steps.select.outputs.trusted_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit_json="$RUNNER_TEMP/shipshape-review-gates-commit.json"
+          tree_json="$RUNNER_TEMP/shipshape-review-gates-tree.json"
+          blob_json="$RUNNER_TEMP/shipshape-review-gates-blob.json"
+          helper="$RUNNER_TEMP/shipshape-review-gates.py"
+          api_headers=(
+            -H "Accept: application/vnd.github+json"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+          )
+          gh api "${api_headers[@]}" \
+            "repos/$GH_REPO/git/commits/$TRUSTED_SHA" > "$commit_json"
+          tree_sha="$(python3 - "$commit_json" "$TRUSTED_SHA" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          tree = payload.get("tree") if isinstance(payload, dict) else None
+          if (
+              payload.get("sha") != sys.argv[2]
+              or not isinstance(tree, dict)
+              or re.fullmatch(r"[0-9a-f]{40}", tree.get("sha", "")) is None
+          ):
+              raise SystemExit("Trusted base commit metadata was malformed.")
+          print(tree["sha"])
+          PY
+          )"
+          gh api "${api_headers[@]}" \
+            "repos/$GH_REPO/git/trees/$tree_sha?recursive=1" > "$tree_json"
+          blob_sha="$(python3 - "$tree_json" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          tree = payload.get("tree") if isinstance(payload, dict) else None
+          if payload.get("truncated") is not False or not isinstance(tree, list):
+              raise SystemExit("Trusted base tree was malformed or truncated.")
+          matches = [
+              item
+              for item in tree
+              if isinstance(item, dict)
+              and item.get("path") == ".sdlc/scripts/review-gates.py"
+              and item.get("type") == "blob"
+              and item.get("mode") == "100644"
+              and re.fullmatch(r"[0-9a-f]{40}", item.get("sha", "")) is not None
+          ]
+          if len(matches) != 1:
+              raise SystemExit("Trusted review helper was missing or not a regular blob.")
+          print(matches[0]["sha"])
+          PY
+          )"
+          gh api "${api_headers[@]}" "repos/$GH_REPO/git/blobs/$blob_sha" > "$blob_json"
+          python3 - "$blob_json" "$helper" "$blob_sha" <<'PY'
+          import base64
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          try:
+              payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+              encoded = payload["content"]
+              if not isinstance(encoded, str):
+                  raise ValueError
+              normalized = encoded.replace("\r", "").replace("\n", "")
+              content = base64.b64decode(normalized, validate=True)
+          except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+              raise SystemExit("Trusted review helper response was malformed.")
+          identity = hashlib.sha1(
+              f"blob {len(content)}\0".encode() + content
+          ).hexdigest()
+          if (
+              not isinstance(payload, dict)
+              or payload.get("encoding") != "base64"
+              or payload.get("size") != len(content)
+              or payload.get("sha") != sys.argv[3]
+              or identity != sys.argv[3]
+              or len(content) > 1_000_000
+              or not content.startswith(b"#!/usr/bin/env python3\n")
+              or b"managed-by: shipshape" not in content[:1000]
+          ):
+              raise SystemExit("Trusted review helper was not a managed regular file.")
+          Path(sys.argv[2]).write_bytes(content)
+          PY
+
+      - name: Reclassify, verify, and attempt one immediate merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.select.outputs.pr }}
+          TRUSTED_SHA: ${{ steps.select.outputs.trusted_sha }}
+          WORKFLOW_RUN_ID: ${{ steps.select.outputs.workflow_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          arguments=(
+            evaluate
+            --repo "$GH_REPO"
+            --pr "$PR_NUMBER"
+            --trusted-base "$TRUSTED_SHA"
+          )
+          if [ -n "$WORKFLOW_RUN_ID" ]; then
+            arguments+=(--workflow-run "$WORKFLOW_RUN_ID")
+          fi
+          python3 "$RUNNER_TEMP/shipshape-review-gates.py" "${arguments[@]}"

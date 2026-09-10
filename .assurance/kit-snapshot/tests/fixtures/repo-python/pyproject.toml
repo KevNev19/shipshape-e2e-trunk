@@ -1,0 +1,7 @@
+[project]
+name = "toy-python-app"
+version = "1.0.0"
+dependencies = ["fastapi"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

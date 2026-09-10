@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Editors / OS
+.DS_Store
+*.swp
+
+# Local-only overrides
+*.local.json
+*.local.md
+
+# Test scratch output
+tests/.scratch/

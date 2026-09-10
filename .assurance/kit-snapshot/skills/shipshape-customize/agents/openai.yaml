@@ -1,0 +1,6 @@
+interface:
+  display_name: "Shipshape Customize"
+  short_description: "Change this repository's Shipshape setup"
+  default_prompt: "Use $shipshape-customize to change this repository's Shipshape setup."
+policy:
+  allow_implicit_invocation: false

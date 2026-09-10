@@ -1,0 +1,6 @@
+interface:
+  display_name: "Shipshape Review"
+  short_description: "Review a change with evidence and a verdict"
+  default_prompt: "Use $shipshape-review to review this change and give a clear verdict."
+policy:
+  allow_implicit_invocation: false

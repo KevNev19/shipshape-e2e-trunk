@@ -1,0 +1,16 @@
+[project]
+name = "shipshape"
+version = "0.2.1"
+description = "Plug-and-play SDLC kit for any git repository, for Codex and Claude Code."
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Fixture repos contain their own toy test files that must never be collected.
+norecursedirs = ["fixtures"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

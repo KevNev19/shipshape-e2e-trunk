@@ -1,0 +1,6 @@
+interface:
+  display_name: "Shipshape Release"
+  short_description: "Prepare and publish a verified release"
+  default_prompt: "Use $shipshape-release to prepare and publish a verified release."
+policy:
+  allow_implicit_invocation: false

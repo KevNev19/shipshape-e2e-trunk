@@ -1,0 +1,37 @@
+{
+  "name": "shipshape",
+  "version": "0.2.1",
+  "description": "Plug-and-play SDLC setup for any git repository, with conversational onboarding and safe defaults.",
+  "author": {
+    "name": "KevNev19",
+    "url": "https://github.com/KevNev19"
+  },
+  "homepage": "https://github.com/KevNev19/shipshape",
+  "repository": "https://github.com/KevNev19/shipshape",
+  "license": "MIT",
+  "keywords": [
+    "sdlc",
+    "github",
+    "security",
+    "ci",
+    "codex",
+    "workflow"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Shipshape",
+    "shortDescription": "Set up a safe SDLC in any repository",
+    "longDescription": "Scan a repository, choose a workflow in plain English, preview every file, and add tested delivery safeguards without clobbering existing work.",
+    "developerName": "KevNev19",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/KevNev19/shipshape",
+    "defaultPrompt": [
+      "Set up this repository with Shipshape.",
+      "Check this repository's Shipshape health."
+    ]
+  }
+}
