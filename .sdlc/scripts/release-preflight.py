@@ -9,6 +9,7 @@ import base64
 import json
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -22,6 +23,7 @@ WORKFLOW_PATHS = {
 }
 API_VERSION = "2022-11-28"
 CODEQL_PRIMARY_LANGUAGES = {"python", "node", "go", "java", "ruby", "csharp"}
+PUBLICATION_HELPER_PATH = ".sdlc/scripts/release-preflight.py"
 
 
 class PreflightFailure(Exception):
@@ -180,6 +182,18 @@ def require_sha(value: object, endpoint: str, field: str = "sha") -> str:
     return value
 
 
+def require_utc_timestamp(value: object, endpoint: str, field: str) -> datetime:
+    if not isinstance(value, str):
+        incomplete(endpoint, f"a workflow run lacks valid {field}")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        incomplete(endpoint, f"a workflow run has malformed {field}")
+    if parsed.utcoffset() != timezone.utc.utcoffset(None):
+        incomplete(endpoint, f"a workflow run has non-UTC {field}")
+    return parsed
+
+
 def validate_repository(value: str) -> str:
     value = value.removesuffix(".git")
     if REPOSITORY_RE.fullmatch(value) is None:
@@ -305,6 +319,74 @@ def workflow_catalog(api: GitHubApi, repository: str) -> dict[str, dict]:
     return by_path
 
 
+def verify_publication_readiness(
+    api: GitHubApi, repository: str, candidate: str, catalog: dict[str, dict]
+) -> dict[str, object]:
+    workflow_path = WORKFLOW_PATHS["release"]
+    workflow = catalog.get(workflow_path)
+    if workflow is None:
+        fail(
+            "publication_workflow_missing",
+            f"Publication workflow {workflow_path} is not registered on GitHub.",
+            f"Render and push {workflow_path} on the default branch, wait for GitHub "
+            "to register it, then rerun preflight.",
+            path=workflow_path,
+        )
+    if workflow.get("state") != "active":
+        fail(
+            "publication_workflow_disabled",
+            f"Publication workflow {workflow_path} is not active.",
+            f"Enable {workflow_path} from the default branch in GitHub Actions, then "
+            "rerun preflight; no prior release run is required.",
+            path=workflow_path,
+            state=workflow.get("state"),
+        )
+
+    helper_path = PUBLICATION_HELPER_PATH
+    endpoint = f"repos/{repository}/contents/{helper_path}"
+    try:
+        helper = api.request(endpoint, fields={"ref": candidate})
+    except PreflightFailure as error:
+        if error.code not in {"github_api_error", "github_api_malformed"}:
+            raise
+        fail(
+            "publication_helper_unavailable",
+            f"Publication helper {helper_path} could not be verified at {candidate}.",
+            f"Render and push {helper_path} on the default branch, confirm GitHub "
+            "Actions read access, then rerun preflight.",
+            path=helper_path,
+            head_sha=candidate,
+        )
+    valid_helper = (
+        isinstance(helper, dict)
+        and helper.get("type") == "file"
+        and helper.get("path") == helper_path
+        and isinstance(helper.get("sha"), str)
+        and SHA_RE.fullmatch(helper["sha"]) is not None
+    )
+    if not valid_helper:
+        fail(
+            "publication_helper_invalid",
+            f"Publication helper {helper_path} has missing or mismatched identity.",
+            f"Render and push the exact {helper_path} file on the default branch, then "
+            "rerun preflight.",
+            path=helper_path,
+            head_sha=candidate,
+        )
+    return {
+        "workflow": {
+            "path": workflow_path,
+            "workflow_id": workflow["id"],
+            "state": workflow["state"],
+        },
+        "helper": {
+            "path": helper_path,
+            "blob_sha": helper["sha"],
+            "head_sha": candidate,
+        },
+    }
+
+
 def validate_run_shape(run: dict, endpoint: str) -> None:
     required_types = {
         "id": int,
@@ -327,10 +409,42 @@ def validate_run_shape(run: dict, endpoint: str) -> None:
         incomplete(endpoint, "run_number or run_attempt is not positive")
     if run.get("conclusion") is not None and not isinstance(run.get("conclusion"), str):
         incomplete(endpoint, "a workflow run has an invalid conclusion")
+    require_utc_timestamp(run.get("run_started_at"), endpoint, "run_started_at")
 
 
 def normalized_run_path(path: str) -> str:
     return path.split("@", 1)[0]
+
+
+def select_latest_current_attempt(
+    runs: list[dict], endpoint: str, key: str, expected_path: str
+) -> dict:
+    chronology = [
+        (require_utc_timestamp(run["run_started_at"], endpoint, "run_started_at"), run)
+        for run in runs
+    ]
+    latest_started_at = max(started_at for started_at, _ in chronology)
+    latest = [run for started_at, run in chronology if started_at == latest_started_at]
+    if len(latest) != 1:
+        fail(
+            "workflow_run_chronology_ambiguous",
+            f"Latest current attempts for {expected_path} share the same run_started_at.",
+            "Rerun the intended final workflow run so one current attempt has an "
+            "unambiguously later start, then rerun preflight.",
+            workflow=key,
+            path=expected_path,
+            run_started_at=latest[0]["run_started_at"],
+            runs=[
+                {
+                    "run_id": run["id"],
+                    "run_number": run["run_number"],
+                    "run_attempt": run["run_attempt"],
+                    "url": run["html_url"],
+                }
+                for run in latest
+            ],
+        )
+    return latest[0]
 
 
 def verify_jobs(
@@ -437,15 +551,16 @@ def verify_workflow(
         fail(
             code,
             f"No applicable {expected_path} push run exists for commit {candidate}.",
-            "Run the exact workflow on the default branch for this commit, then rerun preflight.",
+            "Inspect why the exact push run is absent. If GITHUB_TOKEN suppressed "
+            "a bot-merge push, make a separately approved release/version commit "
+            "and push that new candidate with normal human or appropriately "
+            "authorized app credentials, then restart preflight for its new SHA; "
+            "the old SHA, an unchanged-ref push, and workflow_dispatch do not qualify.",
             workflow=key,
             path=expected_path,
             head_sha=candidate,
         )
-    latest = max(
-        applicable,
-        key=lambda run: (run["run_number"], run["run_attempt"], run["id"]),
-    )
+    latest = select_latest_current_attempt(applicable, endpoint, key, expected_path)
     if latest["status"] != "completed":
         fail(
             "workflow_run_pending",
@@ -478,6 +593,7 @@ def verify_workflow(
         "run_id": latest["id"],
         "run_number": latest["run_number"],
         "run_attempt": latest["run_attempt"],
+        "run_started_at": latest["run_started_at"],
         "check_suite_id": latest["check_suite_id"],
         "head_sha": candidate,
         "head_branch": head_branch,
@@ -490,10 +606,18 @@ def verify_workflow(
 
 
 def verify_workflows(
-    api: GitHubApi, repository: str, default_branch: str, candidate: str
+    api: GitHubApi,
+    repository: str,
+    default_branch: str,
+    candidate: str,
+    *,
+    config: dict | None = None,
+    catalog: dict[str, dict] | None = None,
 ) -> list[dict[str, object]]:
-    config = candidate_config(api, repository, candidate)
-    catalog = workflow_catalog(api, repository)
+    if config is None:
+        config = candidate_config(api, repository, candidate)
+    if catalog is None:
+        catalog = workflow_catalog(api, repository)
     evidence = []
     for key, path in required_workflows(config):
         workflow = catalog.get(path)
@@ -687,12 +811,26 @@ def local_preflight(args: argparse.Namespace, result: dict) -> None:
                 tag_sha=remote_tag_sha,
                 head_sha=candidate,
             )
-    result["workflow_runs"] = verify_workflows(api, repository, default_branch, candidate)
+    config = candidate_config(api, repository, candidate)
+    catalog = workflow_catalog(api, repository)
+    result["publication_artifacts"] = verify_publication_readiness(
+        api, repository, candidate, catalog
+    )
+    result["workflow_runs"] = verify_workflows(
+        api,
+        repository,
+        default_branch,
+        candidate,
+        config=config,
+        catalog=catalog,
+    )
     result["checks"] = [
         "working_tree_clean",
         "actual_default_branch",
         "exact_remote_head",
         "default_branch_ancestry",
+        "release_workflow_active",
+        "publication_helper_present",
         "exact_workflow_runs",
         "successful_jobs",
     ]
@@ -852,6 +990,7 @@ def main(argv: list[str] | None = None) -> int:
         "tag": None,
         "checks": [],
         "workflow_runs": [],
+        "publication_artifacts": {},
         "errors": [],
         "next_action": "Rerun release preflight after resolving the reported blocker.",
     }
