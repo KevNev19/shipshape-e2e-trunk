@@ -1,0 +1,30 @@
+# What this is: automated checks (CI) that run on GitHub every time code is
+# pushed. A green check means the tests passed; a red X means something broke.
+# Safe to edit: yes — shipshape will ask before overwriting your edits.
+# managed-by: shipshape v{{KIT_VERSION}}
+name: CI
+
+on:
+  push:
+    branches: ["{{DEFAULT_BRANCH}}"]
+  pull_request:
+    branches: ["{{DEFAULT_BRANCH}}"]
+
+# Least privilege: this workflow only needs to read the code.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "{{NODE_VERSION}}"
+      - name: Install the declared npm version
+        run: npm install --global npm@{{NODE_PACKAGE_MANAGER_VERSION}}
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests
+        run: {{TEST_CMD}}

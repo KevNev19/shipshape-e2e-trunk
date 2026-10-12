@@ -1,0 +1,6 @@
+interface:
+  display_name: "Shipshape Intent"
+  short_description: "Capture a durable intent for one change"
+  default_prompt: "Use $shipshape-intent to capture a durable intent for this change."
+policy:
+  allow_implicit_invocation: false

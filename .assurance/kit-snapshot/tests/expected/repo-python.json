@@ -1,0 +1,42 @@
+{
+  "ci": {
+    "github_actions": false,
+    "has_codeql": false,
+    "has_dependabot": false,
+    "workflows": []
+  },
+  "existing_sdlc": {
+    "config_present": false,
+    "kit_version": null
+  },
+  "frameworks": [
+    "fastapi"
+  ],
+  "git": {
+    "default_branch": "",
+    "gh_authed": null,
+    "is_repo": false,
+    "owner_repo": "",
+    "remote": ""
+  },
+  "hooks": {
+    "bare_git_hooks": [],
+    "pre_commit_framework": false
+  },
+  "languages": [
+    {
+      "confidence": "high",
+      "evidence": [
+        "pyproject.toml",
+        "2 files (.py)"
+      ],
+      "name": "python"
+    }
+  ],
+  "package_managers": [],
+  "root": "repo-python",
+  "test_command_guess": "pytest",
+  "test_runners": [
+    "pytest"
+  ]
+}

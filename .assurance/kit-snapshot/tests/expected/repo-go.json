@@ -1,0 +1,40 @@
+{
+  "ci": {
+    "github_actions": false,
+    "has_codeql": false,
+    "has_dependabot": false,
+    "workflows": []
+  },
+  "existing_sdlc": {
+    "config_present": false,
+    "kit_version": null
+  },
+  "frameworks": [],
+  "git": {
+    "default_branch": "",
+    "gh_authed": null,
+    "is_repo": false,
+    "owner_repo": "",
+    "remote": ""
+  },
+  "hooks": {
+    "bare_git_hooks": [],
+    "pre_commit_framework": false
+  },
+  "languages": [
+    {
+      "confidence": "high",
+      "evidence": [
+        "go.mod",
+        "1 file (.go)"
+      ],
+      "name": "go"
+    }
+  ],
+  "package_managers": [],
+  "root": "repo-go",
+  "test_command_guess": "go test ./...",
+  "test_runners": [
+    "go test"
+  ]
+}

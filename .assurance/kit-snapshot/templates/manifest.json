@@ -1,0 +1,345 @@
+{
+  "comment": "Single source of truth for what shipshape writes into a target repo. Each entry: src (template under templates/), dest (path in target repo), optional when (all conditions must hold), optional feature_flag (config.features gate), optional remove_when_inapplicable for safety-critical revocation, pillar, overwrite_policy (ask-if-drifted | write-once).",
+  "templates": [
+    {
+      "src": "harness/sdlc-harness.md.tmpl",
+      "dest": "docs/sdlc/harness.md",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "adapters/CLAUDE.md.tmpl",
+      "dest": "CLAUDE.md",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "adapters/AGENTS.md.tmpl",
+      "dest": "AGENTS.md",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "docs/design-doc.md.tmpl",
+      "dest": "docs/sdlc/design.md",
+      "pillar": "onboarding",
+      "overwrite_policy": "write-once"
+    },
+    {
+      "src": "docs/change-intent.md.tmpl",
+      "dest": ".sdlc/templates/change-intent.md",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/ci-python.yml.tmpl",
+      "dest": ".github/workflows/ci.yml",
+      "when": { "primary_language": "python" },
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/ci-node.yml.tmpl",
+      "dest": ".github/workflows/ci.yml",
+      "when": { "primary_language": "node", "node_package_manager": "npm_legacy" },
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/ci-node-npm.yml.tmpl",
+      "dest": ".github/workflows/ci.yml",
+      "when": { "primary_language": "node", "node_package_manager": "npm" },
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/ci-node-npm-corepack.yml.tmpl",
+      "dest": ".github/workflows/ci.yml",
+      "when": { "primary_language": "node", "node_package_manager": "npm_corepack" },
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/ci-node-pnpm.yml.tmpl",
+      "dest": ".github/workflows/ci.yml",
+      "when": { "primary_language": "node", "node_package_manager": "pnpm" },
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/ci-node-yarn-classic.yml.tmpl",
+      "dest": ".github/workflows/ci.yml",
+      "when": { "primary_language": "node", "node_package_manager": "yarn_classic" },
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/ci-node-yarn-modern.yml.tmpl",
+      "dest": ".github/workflows/ci.yml",
+      "when": { "primary_language": "node", "node_package_manager": "yarn_modern" },
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/ci-node-bun.yml.tmpl",
+      "dest": ".github/workflows/ci.yml",
+      "when": { "primary_language": "node", "node_package_manager": "bun" },
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/ci-go.yml.tmpl",
+      "dest": ".github/workflows/ci.yml",
+      "when": { "primary_language": "go" },
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/ci-generic.yml.tmpl",
+      "dest": ".github/workflows/ci.yml",
+      "when": { "primary_language_not_in": ["python", "node", "go"] },
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "scripts/doctor.py.tmpl",
+      "dest": ".sdlc/scripts/doctor.py",
+      "feature_flag": "scheduled_health",
+      "mode": "755",
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/shipshape-doctor.yml.tmpl",
+      "dest": ".github/workflows/shipshape-doctor.yml",
+      "feature_flag": "scheduled_health",
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "scripts/review-gates.py.tmpl",
+      "dest": ".sdlc/scripts/review-gates.py",
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/low-risk-automerge.yml.tmpl",
+      "dest": ".github/workflows/low-risk-automerge.yml",
+      "when": { "workflow_style": "pr" },
+      "feature_flag": "tiered_review",
+      "remove_when_inapplicable": true,
+      "pillar": "workflows",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "hooks/secret-guard.sh.tmpl",
+      "dest": ".sdlc/hooks/secret-guard.sh",
+      "feature_flag": "secret_guard",
+      "mode": "755",
+      "pillar": "security",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "hooks/install.sh.tmpl",
+      "dest": ".sdlc/hooks/install.sh",
+      "feature_flag": "secret_guard",
+      "mode": "755",
+      "pillar": "security",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "precommit/pre-commit-config.yaml.tmpl",
+      "dest": ".pre-commit-config.yaml",
+      "feature_flag": "secret_guard",
+      "pillar": "security",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/codeql.yml.tmpl",
+      "dest": ".github/workflows/codeql.yml",
+      "when": { "primary_language_in": ["python", "node", "go", "java", "ruby", "csharp"] },
+      "feature_flag": "codeql",
+      "pillar": "security",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/dependabot.yml.tmpl",
+      "dest": ".github/dependabot.yml",
+      "feature_flag": "dependabot",
+      "pillar": "security",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/secret-scan.yml.tmpl",
+      "dest": ".github/workflows/secret-scan.yml",
+      "feature_flag": "secret_guard",
+      "pillar": "security",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/copilot-setup-python.yml.tmpl",
+      "dest": ".github/workflows/copilot-setup-steps.yml",
+      "when": { "primary_language": "python" },
+      "feature_flag": "github_agents",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/copilot-setup-node.yml.tmpl",
+      "dest": ".github/workflows/copilot-setup-steps.yml",
+      "when": { "primary_language": "node", "node_package_manager": "npm_legacy" },
+      "feature_flag": "github_agents",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/copilot-setup-node-npm.yml.tmpl",
+      "dest": ".github/workflows/copilot-setup-steps.yml",
+      "when": { "primary_language": "node", "node_package_manager": "npm" },
+      "feature_flag": "github_agents",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/copilot-setup-node-npm-corepack.yml.tmpl",
+      "dest": ".github/workflows/copilot-setup-steps.yml",
+      "when": { "primary_language": "node", "node_package_manager": "npm_corepack" },
+      "feature_flag": "github_agents",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/copilot-setup-node-pnpm.yml.tmpl",
+      "dest": ".github/workflows/copilot-setup-steps.yml",
+      "when": { "primary_language": "node", "node_package_manager": "pnpm" },
+      "feature_flag": "github_agents",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/copilot-setup-node-yarn-classic.yml.tmpl",
+      "dest": ".github/workflows/copilot-setup-steps.yml",
+      "when": { "primary_language": "node", "node_package_manager": "yarn_classic" },
+      "feature_flag": "github_agents",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/copilot-setup-node-yarn-modern.yml.tmpl",
+      "dest": ".github/workflows/copilot-setup-steps.yml",
+      "when": { "primary_language": "node", "node_package_manager": "yarn_modern" },
+      "feature_flag": "github_agents",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/copilot-setup-node-bun.yml.tmpl",
+      "dest": ".github/workflows/copilot-setup-steps.yml",
+      "when": { "primary_language": "node", "node_package_manager": "bun" },
+      "feature_flag": "github_agents",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/copilot-setup-go.yml.tmpl",
+      "dest": ".github/workflows/copilot-setup-steps.yml",
+      "when": { "primary_language": "go" },
+      "feature_flag": "github_agents",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/copilot-setup-generic.yml.tmpl",
+      "dest": ".github/workflows/copilot-setup-steps.yml",
+      "when": { "primary_language_not_in": ["python", "node", "go"] },
+      "feature_flag": "github_agents",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/agents/reviewer.md.tmpl",
+      "dest": ".github/agents/reviewer.md",
+      "feature_flag": "github_agents",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/copilot-instructions.md.tmpl",
+      "dest": ".github/copilot-instructions.md",
+      "feature_flag": "github_agents",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "security/SECURITY.md.tmpl",
+      "dest": "SECURITY.md",
+      "pillar": "security",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "security/security-explainer.md.tmpl",
+      "dest": "docs/sdlc/security.md",
+      "pillar": "security",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "scripts/release-preflight.py.tmpl",
+      "dest": ".sdlc/scripts/release-preflight.py",
+      "feature_flag": "release_automation",
+      "mode": "755",
+      "pillar": "release",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/workflows/release.yml.tmpl",
+      "dest": ".github/workflows/release.yml",
+      "feature_flag": "release_automation",
+      "pillar": "release",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "docs/glossary.md.tmpl",
+      "dest": "docs/sdlc/glossary.md",
+      "pillar": "onboarding",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/PULL_REQUEST_TEMPLATE.md.tmpl",
+      "dest": ".github/PULL_REQUEST_TEMPLATE.md",
+      "when": { "workflow_style": "pr" },
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/CODEOWNERS.tmpl",
+      "dest": ".github/CODEOWNERS",
+      "when": { "workflow_style": "pr", "has_owner": true },
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/ISSUE_TEMPLATE/bug.yml.tmpl",
+      "dest": ".github/ISSUE_TEMPLATE/bug.yml",
+      "when": { "collaboration": true },
+      "feature_flag": "issue_templates",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/ISSUE_TEMPLATE/task.yml.tmpl",
+      "dest": ".github/ISSUE_TEMPLATE/task.yml",
+      "when": { "collaboration": true },
+      "feature_flag": "issue_templates",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    },
+    {
+      "src": "github/ISSUE_TEMPLATE/config.yml.tmpl",
+      "dest": ".github/ISSUE_TEMPLATE/config.yml",
+      "when": { "collaboration": true },
+      "feature_flag": "issue_templates",
+      "pillar": "process",
+      "overwrite_policy": "ask-if-drifted"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Shipshape Init"
+  short_description: "Set up repository delivery safeguards"
+  default_prompt: "Use $shipshape-init to set up this repository's delivery process."
+policy:
+  allow_implicit_invocation: false

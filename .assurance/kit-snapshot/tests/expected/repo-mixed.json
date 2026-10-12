@@ -1,0 +1,60 @@
+{
+  "ci": {
+    "github_actions": false,
+    "has_codeql": false,
+    "has_dependabot": false,
+    "workflows": []
+  },
+  "existing_sdlc": {
+    "config_present": false,
+    "kit_version": null
+  },
+  "frameworks": [
+    "flask",
+    "react"
+  ],
+  "git": {
+    "default_branch": "",
+    "gh_authed": null,
+    "is_repo": false,
+    "owner_repo": "",
+    "remote": ""
+  },
+  "hooks": {
+    "bare_git_hooks": [],
+    "pre_commit_framework": false
+  },
+  "languages": [
+    {
+      "confidence": "high",
+      "evidence": [
+        "package.json",
+        "1 file (.cjs, .js, .jsx, .mjs, .ts, .tsx)"
+      ],
+      "name": "node"
+    },
+    {
+      "confidence": "high",
+      "evidence": [
+        "pyproject.toml",
+        "1 file (.py)"
+      ],
+      "name": "python"
+    }
+  ],
+  "node_package_manager": {
+    "error": "package.json identifies a Node project, but no package-lock.json or npm-shrinkwrap.json was found; commit an npm lockfile before initializing shipshape",
+    "lockfiles": [],
+    "name": "npm",
+    "variant": "",
+    "version": ""
+  },
+  "package_managers": [
+    "npm"
+  ],
+  "root": "repo-mixed",
+  "test_command_guess": "npm test",
+  "test_runners": [
+    "jest"
+  ]
+}

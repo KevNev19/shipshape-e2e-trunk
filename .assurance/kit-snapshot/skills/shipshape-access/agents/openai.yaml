@@ -1,0 +1,6 @@
+interface:
+  display_name: "Shipshape Access"
+  short_description: "Manage GitHub access and branch protection"
+  default_prompt: "Use $shipshape-access to manage this repository's GitHub access."
+policy:
+  allow_implicit_invocation: false

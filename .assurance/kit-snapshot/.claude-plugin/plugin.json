@@ -1,0 +1,19 @@
+{
+  "name": "shipshape",
+  "description": "Plug-and-play SDLC setup for any git repository: scans your project, then sets up CI, security guardrails, reviews, and releases in plain English. Built for everyone, not just software engineers.",
+  "version": "0.2.1",
+  "author": {
+    "name": "KevNev19"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/KevNev19/shipshape",
+  "keywords": [
+    "sdlc",
+    "github",
+    "security",
+    "ci",
+    "onboarding",
+    "claude-code",
+    "workflow"
+  ]
+}

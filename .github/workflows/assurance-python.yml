@@ -1,0 +1,50 @@
+name: Assurance Python compatibility
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.assurance/kit-snapshot/**'
+      - '.github/workflows/assurance-python.yml'
+permissions:
+  contents: read
+jobs:
+  compatibility:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.14']
+    defaults:
+      run:
+        working-directory: .assurance/kit-snapshot
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the recorded test tool versions
+        run: python -m pip install pytest==9.0.3 ruff==0.16.6 pre-commit==4.6.0
+      - name: Verify recorded source bytes and modes
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path('../kit-snapshot-manifest.json').read_text())
+          for name, record in manifest['files'].items():
+              path = Path(name)
+              assert hashlib.sha256(path.read_bytes()).hexdigest() == record['sha256'], name
+              assert bool(path.stat().st_mode & 0o111) == (record['mode'] == '100755'), name
+          print(f"Verified {len(manifest['files'])} source files")
+          PY
+      - name: Lint and formatting
+        run: ruff check . && ruff format --check .
+      - name: Full tests
+        run: python -m pytest tests/ -q
+      - name: Dated regressions
+        run: python tests/regressions.py
+      - name: Mechanical consumer setup and repair
+        run: bash tests/e2e.sh

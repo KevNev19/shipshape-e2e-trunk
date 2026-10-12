@@ -1,0 +1,52 @@
+{
+  "ci": {
+    "github_actions": false,
+    "has_codeql": false,
+    "has_dependabot": false,
+    "workflows": []
+  },
+  "existing_sdlc": {
+    "config_present": false,
+    "kit_version": null
+  },
+  "frameworks": [
+    "express"
+  ],
+  "git": {
+    "default_branch": "",
+    "gh_authed": null,
+    "is_repo": false,
+    "owner_repo": "",
+    "remote": ""
+  },
+  "hooks": {
+    "bare_git_hooks": [],
+    "pre_commit_framework": false
+  },
+  "languages": [
+    {
+      "confidence": "high",
+      "evidence": [
+        "package.json",
+        "1 file (.cjs, .js, .jsx, .mjs, .ts, .tsx)"
+      ],
+      "name": "node"
+    }
+  ],
+  "node_package_manager": {
+    "lockfiles": [
+      "package-lock.json"
+    ],
+    "name": "npm",
+    "variant": "npm",
+    "version": ""
+  },
+  "package_managers": [
+    "npm"
+  ],
+  "root": "repo-node",
+  "test_command_guess": "npm test",
+  "test_runners": [
+    "vitest"
+  ]
+}

@@ -1,0 +1,26 @@
+# What this is: environment setup for GitHub's cloud coding agents (like the
+# Copilot coding agent). When an agent picks up a task on this repository,
+# these steps prepare its workspace so it can run the tests before opening
+# a pull request. The job name must stay "copilot-setup-steps".
+# Safe to edit: yes — shipshape will ask before overwriting your edits.
+# managed-by: shipshape v{{KIT_VERSION}}
+name: "Copilot Setup Steps"
+
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "{{NODE_VERSION}}"
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - name: Run tests
+        run: {{TEST_CMD}}

@@ -1,0 +1,42 @@
+{
+  "ci": {
+    "github_actions": false,
+    "has_codeql": false,
+    "has_dependabot": false,
+    "workflows": []
+  },
+  "existing_sdlc": {
+    "config_present": false,
+    "kit_version": null
+  },
+  "frameworks": [],
+  "git": {
+    "default_branch": "",
+    "gh_authed": null,
+    "is_repo": false,
+    "owner_repo": "",
+    "remote": ""
+  },
+  "hooks": {
+    "bare_git_hooks": [],
+    "pre_commit_framework": false
+  },
+  "languages": [
+    {
+      "confidence": "high",
+      "evidence": [
+        "Cargo.toml",
+        "1 file (.rs)"
+      ],
+      "name": "rust"
+    }
+  ],
+  "package_managers": [
+    "cargo"
+  ],
+  "root": "repo-rust",
+  "test_command_guess": "cargo test",
+  "test_runners": [
+    "cargo test"
+  ]
+}

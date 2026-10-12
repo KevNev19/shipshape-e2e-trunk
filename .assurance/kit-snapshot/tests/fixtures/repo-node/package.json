@@ -1,0 +1,13 @@
+{
+  "name": "toy-node-app",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "express": "^4.19.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0"
+  }
+}
