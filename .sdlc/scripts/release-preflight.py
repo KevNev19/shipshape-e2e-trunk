@@ -9,6 +9,7 @@ import base64
 import json
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -16,12 +17,26 @@ SHA_RE = re.compile(r"[0-9a-f]{40}")
 REPOSITORY_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 WORKFLOW_PATHS = {
     "ci": ".github/workflows/ci.yml",
-    "secret_scan": ".github/workflows/secret-scan.yml",
+    "guard": ".github/workflows/secret-scan.yml",
     "codeql": ".github/workflows/codeql.yml",
     "release": ".github/workflows/release.yml",
 }
 API_VERSION = "2022-11-28"
 CODEQL_PRIMARY_LANGUAGES = {"python", "node", "go", "java", "ruby", "csharp"}
+CODEQL_FINDINGS_APP_ID = 57789
+CODEQL_FINDINGS_NAME = "CodeQL"
+CHECK_RUN_STATUSES = {"queued", "in_progress", "completed", "waiting", "requested", "pending"}
+CHECK_RUN_CONCLUSIONS = {
+    "action_required",
+    "cancelled",
+    "failure",
+    "neutral",
+    "success",
+    "skipped",
+    "stale",
+    "timed_out",
+}
+PUBLICATION_HELPER_PATH = ".sdlc/scripts/release-preflight.py"
 
 
 class PreflightFailure(Exception):
@@ -180,6 +195,20 @@ def require_sha(value: object, endpoint: str, field: str = "sha") -> str:
     return value
 
 
+def require_utc_timestamp(
+    value: object, endpoint: str, field: str, *, subject: str = "workflow run"
+) -> datetime:
+    if not isinstance(value, str):
+        incomplete(endpoint, f"a {subject} lacks valid {field}")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        incomplete(endpoint, f"a {subject} has malformed {field}")
+    if parsed.utcoffset() != timezone.utc.utcoffset(None):
+        incomplete(endpoint, f"a {subject} has non-UTC {field}")
+    return parsed
+
+
 def validate_repository(value: str) -> str:
     value = value.removesuffix(".git")
     if REPOSITORY_RE.fullmatch(value) is None:
@@ -279,7 +308,7 @@ def required_workflows(config: dict) -> list[tuple[str, str]]:
     languages = config["languages"]
     required = [("ci", WORKFLOW_PATHS["ci"])]
     if features["secret_guard"]:
-        required.append(("secret_scan", WORKFLOW_PATHS["secret_scan"]))
+        required.append(("secret_scan", WORKFLOW_PATHS["guard"]))
     if features["codeql"] and languages and languages[0] in CODEQL_PRIMARY_LANGUAGES:
         required.append(("codeql", WORKFLOW_PATHS["codeql"]))
     return required
@@ -305,6 +334,74 @@ def workflow_catalog(api: GitHubApi, repository: str) -> dict[str, dict]:
     return by_path
 
 
+def verify_publication_readiness(
+    api: GitHubApi, repository: str, candidate: str, catalog: dict[str, dict]
+) -> dict[str, object]:
+    workflow_path = WORKFLOW_PATHS["release"]
+    workflow = catalog.get(workflow_path)
+    if workflow is None:
+        fail(
+            "publication_workflow_missing",
+            f"Publication workflow {workflow_path} is not registered on GitHub.",
+            f"Render and push {workflow_path} on the default branch, wait for GitHub "
+            "to register it, then rerun preflight.",
+            path=workflow_path,
+        )
+    if workflow.get("state") != "active":
+        fail(
+            "publication_workflow_disabled",
+            f"Publication workflow {workflow_path} is not active.",
+            f"Enable {workflow_path} from the default branch in GitHub Actions, then "
+            "rerun preflight; no prior release run is required.",
+            path=workflow_path,
+            state=workflow.get("state"),
+        )
+
+    helper_path = PUBLICATION_HELPER_PATH
+    endpoint = f"repos/{repository}/contents/{helper_path}"
+    try:
+        helper = api.request(endpoint, fields={"ref": candidate})
+    except PreflightFailure as error:
+        if error.code not in {"github_api_error", "github_api_malformed"}:
+            raise
+        fail(
+            "publication_helper_unavailable",
+            f"Publication helper {helper_path} could not be verified at {candidate}.",
+            f"Render and push {helper_path} on the default branch, confirm GitHub "
+            "Actions read access, then rerun preflight.",
+            path=helper_path,
+            head_sha=candidate,
+        )
+    valid_helper = (
+        isinstance(helper, dict)
+        and helper.get("type") == "file"
+        and helper.get("path") == helper_path
+        and isinstance(helper.get("sha"), str)
+        and SHA_RE.fullmatch(helper["sha"]) is not None
+    )
+    if not valid_helper:
+        fail(
+            "publication_helper_invalid",
+            f"Publication helper {helper_path} has missing or mismatched identity.",
+            f"Render and push the exact {helper_path} file on the default branch, then "
+            "rerun preflight.",
+            path=helper_path,
+            head_sha=candidate,
+        )
+    return {
+        "workflow": {
+            "path": workflow_path,
+            "workflow_id": workflow["id"],
+            "state": workflow["state"],
+        },
+        "helper": {
+            "path": helper_path,
+            "blob_sha": helper["sha"],
+            "head_sha": candidate,
+        },
+    }
+
+
 def validate_run_shape(run: dict, endpoint: str) -> None:
     required_types = {
         "id": int,
@@ -327,10 +424,42 @@ def validate_run_shape(run: dict, endpoint: str) -> None:
         incomplete(endpoint, "run_number or run_attempt is not positive")
     if run.get("conclusion") is not None and not isinstance(run.get("conclusion"), str):
         incomplete(endpoint, "a workflow run has an invalid conclusion")
+    require_utc_timestamp(run.get("run_started_at"), endpoint, "run_started_at")
 
 
 def normalized_run_path(path: str) -> str:
     return path.split("@", 1)[0]
+
+
+def select_latest_current_attempt(
+    runs: list[dict], endpoint: str, key: str, expected_path: str
+) -> dict:
+    chronology = [
+        (require_utc_timestamp(run["run_started_at"], endpoint, "run_started_at"), run)
+        for run in runs
+    ]
+    latest_started_at = max(started_at for started_at, _ in chronology)
+    latest = [run for started_at, run in chronology if started_at == latest_started_at]
+    if len(latest) != 1:
+        fail(
+            "workflow_run_chronology_ambiguous",
+            f"Latest current attempts for {expected_path} share the same run_started_at.",
+            "Rerun the intended final workflow run so one current attempt has an "
+            "unambiguously later start, then rerun preflight.",
+            workflow=key,
+            path=expected_path,
+            run_started_at=latest[0]["run_started_at"],
+            runs=[
+                {
+                    "run_id": run["id"],
+                    "run_number": run["run_number"],
+                    "run_attempt": run["run_attempt"],
+                    "url": run["html_url"],
+                }
+                for run in latest
+            ],
+        )
+    return latest[0]
 
 
 def verify_jobs(
@@ -437,15 +566,16 @@ def verify_workflow(
         fail(
             code,
             f"No applicable {expected_path} push run exists for commit {candidate}.",
-            "Run the exact workflow on the default branch for this commit, then rerun preflight.",
+            "Inspect why the exact push run is absent. If GITHUB_TOKEN suppressed "
+            "a bot-merge push, make a separately approved release/version commit "
+            "and push that new candidate with normal human or appropriately "
+            "authorized app credentials, then restart preflight for its new SHA; "
+            "the old SHA, an unchanged-ref push, and workflow_dispatch do not qualify.",
             workflow=key,
             path=expected_path,
             head_sha=candidate,
         )
-    latest = max(
-        applicable,
-        key=lambda run: (run["run_number"], run["run_attempt"], run["id"]),
-    )
+    latest = select_latest_current_attempt(applicable, endpoint, key, expected_path)
     if latest["status"] != "completed":
         fail(
             "workflow_run_pending",
@@ -478,6 +608,7 @@ def verify_workflow(
         "run_id": latest["id"],
         "run_number": latest["run_number"],
         "run_attempt": latest["run_attempt"],
+        "run_started_at": latest["run_started_at"],
         "check_suite_id": latest["check_suite_id"],
         "head_sha": candidate,
         "head_branch": head_branch,
@@ -489,11 +620,199 @@ def verify_workflow(
     }
 
 
+def verify_codeql_findings(
+    api: GitHubApi,
+    repository: str,
+    candidate: str,
+    analysis: dict[str, object],
+) -> dict[str, object]:
+    endpoint = f"repos/{repository}/commits/{candidate}/check-runs"
+    checks = api.object_pages(
+        endpoint,
+        "check_runs",
+        fields={
+            "check_name": CODEQL_FINDINGS_NAME,
+            "app_id": str(CODEQL_FINDINGS_APP_ID),
+            "filter": "all",
+            "per_page": "100",
+        },
+    )
+    analysis_started_at = require_utc_timestamp(
+        analysis.get("run_started_at"), endpoint, "run_started_at"
+    )
+    chronologies: list[tuple[datetime, dict]] = []
+    seen_ids: set[int] = set()
+    for check in checks:
+        check_id = check.get("id")
+        name = check.get("name")
+        head_sha = check.get("head_sha")
+        status = check.get("status")
+        conclusion = check.get("conclusion")
+        app = check.get("app")
+        suite = check.get("check_suite")
+        url = check.get("html_url")
+        if (
+            type(check_id) is not int
+            or check_id <= 0
+            or not isinstance(name, str)
+            or not name
+            or not isinstance(app, dict)
+            or type(app.get("id")) is not int
+            or app["id"] <= 0
+            or not isinstance(suite, dict)
+            or type(suite.get("id")) is not int
+            or suite["id"] <= 0
+            or not isinstance(status, str)
+            or status not in CHECK_RUN_STATUSES
+            or (
+                conclusion is not None
+                and (not isinstance(conclusion, str) or conclusion not in CHECK_RUN_CONCLUSIONS)
+            )
+            or not isinstance(url, str)
+            or not url
+        ):
+            incomplete(endpoint, "a CodeQL findings check has malformed identity or state")
+        head_sha = require_sha(head_sha, endpoint, "head_sha")
+        parsed_url = urlparse(url)
+        if (
+            parsed_url.scheme != "https"
+            or parsed_url.hostname != "github.com"
+            or parsed_url.netloc != "github.com"
+        ):
+            incomplete(endpoint, "a CodeQL findings check has an invalid GitHub URL")
+        if (
+            name != CODEQL_FINDINGS_NAME
+            or head_sha != candidate
+            or app["id"] != CODEQL_FINDINGS_APP_ID
+        ):
+            fail(
+                "codeql_findings_identity_mismatch",
+                "A returned CodeQL findings check did not match the exact candidate and app.",
+                "Inspect the exact candidate's CodeQL checks and rerun the expected workflow.",
+                check_run_id=check_id,
+                head_sha=candidate,
+                expected_app_id=CODEQL_FINDINGS_APP_ID,
+            )
+        if check_id in seen_ids:
+            fail(
+                "codeql_findings_chronology_ambiguous",
+                "CodeQL findings check pagination returned a duplicate identity.",
+                "Wait for GitHub's check evidence to settle, then rerun preflight.",
+                check_run_id=check_id,
+            )
+        seen_ids.add(check_id)
+        started_at = require_utc_timestamp(
+            check.get("started_at"), endpoint, "started_at", subject="CodeQL findings check"
+        )
+        completed_at = check.get("completed_at")
+        if status == "completed":
+            completed = require_utc_timestamp(
+                completed_at,
+                endpoint,
+                "completed_at",
+                subject="CodeQL findings check",
+            )
+            if completed < started_at or conclusion is None:
+                incomplete(endpoint, "a completed CodeQL findings check has invalid completion")
+        elif conclusion is not None or completed_at is not None:
+            incomplete(endpoint, "a pending CodeQL findings check has completion evidence")
+        chronologies.append((started_at, check))
+
+    applicable = [item for item in chronologies if item[0] >= analysis_started_at]
+    if not applicable:
+        fail(
+            "codeql_findings_absent",
+            "No CodeQL findings check is bound closely enough to the selected analysis attempt.",
+            "Wait for the exact candidate's CodeQL findings check or rerun the exact CodeQL "
+            "workflow, then rerun preflight.",
+            head_sha=candidate,
+            analysis_run_id=analysis["run_id"],
+            analysis_started_at=analysis["run_started_at"],
+        )
+    latest_started_at = max(started_at for started_at, _ in applicable)
+    latest = [check for started_at, check in applicable if started_at == latest_started_at]
+    if len(latest) != 1:
+        fail(
+            "codeql_findings_chronology_ambiguous",
+            "Latest CodeQL findings checks share the same started_at.",
+            "Rerun the exact CodeQL workflow so one findings check is unambiguously latest.",
+            head_sha=candidate,
+            started_at=latest[0]["started_at"],
+            check_run_ids=[check["id"] for check in latest],
+        )
+    selected = latest[0]
+    suite_id = selected["check_suite"]["id"]
+    suite_endpoint = f"repos/{repository}/check-suites/{suite_id}"
+    suite = require_dict(api.request(suite_endpoint), suite_endpoint)
+    suite_app = suite.get("app")
+    if (
+        type(suite.get("id")) is not int
+        or not isinstance(suite_app, dict)
+        or type(suite_app.get("id")) is not int
+    ):
+        incomplete(suite_endpoint, "CodeQL check suite identity is malformed")
+    suite_head = require_sha(suite.get("head_sha"), suite_endpoint, "head_sha")
+    if (
+        suite["id"] != suite_id
+        or suite_head != candidate
+        or suite_app["id"] != CODEQL_FINDINGS_APP_ID
+    ):
+        fail(
+            "codeql_findings_identity_mismatch",
+            "The selected CodeQL findings suite did not match the exact candidate and app.",
+            "Inspect the exact candidate's CodeQL checks and rerun the expected workflow.",
+            check_run_id=selected["id"],
+            check_suite_id=suite_id,
+            head_sha=candidate,
+            expected_app_id=CODEQL_FINDINGS_APP_ID,
+        )
+    if selected["status"] != "completed":
+        fail(
+            "codeql_findings_pending",
+            f"The latest CodeQL findings check is {selected['status']}.",
+            "Wait for the exact candidate's CodeQL findings check to complete, then rerun "
+            "preflight.",
+            check_run_id=selected["id"],
+            status=selected["status"],
+            url=selected["html_url"],
+        )
+    if selected["conclusion"] != "success":
+        fail(
+            "codeql_findings_unsuccessful",
+            f"The latest CodeQL findings check concluded {selected['conclusion']}.",
+            "Resolve the CodeQL findings and obtain a successful exact-candidate check "
+            "before rerunning preflight.",
+            check_run_id=selected["id"],
+            conclusion=selected["conclusion"],
+            url=selected["html_url"],
+        )
+    return {
+        "name": CODEQL_FINDINGS_NAME,
+        "app_id": CODEQL_FINDINGS_APP_ID,
+        "check_run_id": selected["id"],
+        "check_suite_id": suite_id,
+        "head_sha": candidate,
+        "status": selected["status"],
+        "conclusion": selected["conclusion"],
+        "started_at": selected["started_at"],
+        "completed_at": selected["completed_at"],
+        "url": selected["html_url"],
+    }
+
+
 def verify_workflows(
-    api: GitHubApi, repository: str, default_branch: str, candidate: str
+    api: GitHubApi,
+    repository: str,
+    default_branch: str,
+    candidate: str,
+    *,
+    config: dict | None = None,
+    catalog: dict[str, dict] | None = None,
 ) -> list[dict[str, object]]:
-    config = candidate_config(api, repository, candidate)
-    catalog = workflow_catalog(api, repository)
+    if config is None:
+        config = candidate_config(api, repository, candidate)
+    if catalog is None:
+        catalog = workflow_catalog(api, repository)
     evidence = []
     for key, path in required_workflows(config):
         workflow = catalog.get(path)
@@ -505,9 +824,14 @@ def verify_workflows(
                 workflow=key,
                 path=path,
             )
-        evidence.append(
-            verify_workflow(api, repository, default_branch, candidate, key, path, workflow)
+        workflow_evidence = verify_workflow(
+            api, repository, default_branch, candidate, key, path, workflow
         )
+        if key == "codeql":
+            workflow_evidence["findings_check"] = verify_codeql_findings(
+                api, repository, candidate, workflow_evidence
+            )
+        evidence.append(workflow_evidence)
     return evidence
 
 
@@ -687,15 +1011,31 @@ def local_preflight(args: argparse.Namespace, result: dict) -> None:
                 tag_sha=remote_tag_sha,
                 head_sha=candidate,
             )
-    result["workflow_runs"] = verify_workflows(api, repository, default_branch, candidate)
+    config = candidate_config(api, repository, candidate)
+    catalog = workflow_catalog(api, repository)
+    result["publication_artifacts"] = verify_publication_readiness(
+        api, repository, candidate, catalog
+    )
+    result["workflow_runs"] = verify_workflows(
+        api,
+        repository,
+        default_branch,
+        candidate,
+        config=config,
+        catalog=catalog,
+    )
     result["checks"] = [
         "working_tree_clean",
         "actual_default_branch",
         "exact_remote_head",
         "default_branch_ancestry",
+        "release_workflow_active",
+        "publication_helper_present",
         "exact_workflow_runs",
         "successful_jobs",
     ]
+    if any("findings_check" in run for run in result["workflow_runs"]):
+        result["checks"].append("successful_codeql_findings")
     if args.tag is not None:
         result["checks"].extend(["local_tag_matches_candidate", "remote_tag_absent"])
     result["next_action"] = (
@@ -741,6 +1081,8 @@ def publish_preflight(args: argparse.Namespace, result: dict) -> None:
         "exact_workflow_runs",
         "successful_jobs",
     ]
+    if any("findings_check" in run for run in result["workflow_runs"]):
+        result["checks"].append("successful_codeql_findings")
     result["next_action"] = f"Publish GitHub release {tag} for exact commit {candidate}."
 
 
@@ -819,6 +1161,8 @@ def verify_release(args: argparse.Namespace, result: dict) -> None:
         "exact_release_run",
         "published_release",
     ]
+    if any("findings_check" in run for run in workflow_evidence):
+        result["checks"].append("successful_codeql_findings")
     result["next_action"] = f"Release {tag} is verified at {release['html_url']}."
 
 
@@ -852,6 +1196,7 @@ def main(argv: list[str] | None = None) -> int:
         "tag": None,
         "checks": [],
         "workflow_runs": [],
+        "publication_artifacts": {},
         "errors": [],
         "next_action": "Rerun release preflight after resolving the reported blocker.",
     }
