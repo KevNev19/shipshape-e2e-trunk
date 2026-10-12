@@ -14,7 +14,7 @@ FIXTURES = KIT_ROOT / "tests" / "fixtures"
 
 @pytest.fixture
 def hermetic_doctor_path(tmp_path: Path, monkeypatch) -> Path:
-    """Keep doctor subprocesses away from host-installed CLI tools."""
+    """Keep doctor subprocesses away from host tools and ambient CI mode."""
     bin_dir = tmp_path / "doctor-bin"
     bin_dir.mkdir(exist_ok=True)
     for command in ("git", "python3"):
@@ -22,6 +22,7 @@ def hermetic_doctor_path(tmp_path: Path, monkeypatch) -> Path:
         assert executable is not None
         (bin_dir / command).symlink_to(executable)
     monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     assert shutil.which("gh") is None
     return bin_dir
 

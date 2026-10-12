@@ -16,12 +16,24 @@ version. `ok: true` means all of these refer to one exact SHA:
   an unambiguously latest applicable `push` attempt for that SHA and branch,
   ordered by the current attempt's UTC `run_started_at`;
 - each applicable run completed successfully and every returned job succeeded.
+- when CodeQL applies, the uniquely latest exact-SHA `CodeQL` findings check
+  from GitHub Advanced Security app `57789` began no earlier than the selected
+  analysis attempt, completed successfully, and has an exact-SHA suite from
+  the same app.
 
 An unrelated workflow, a same-named workflow at another path, an earlier green
 attempt before a failed rerun, or a skipped job supplies no evidence. API,
 authentication, pagination, missing/malformed/tied attempt chronology, and
 incomplete-response errors all stop publication. A local-only repository is not
 GitHub-release-ready: connect and push its intended GitHub origin first.
+
+A successful CodeQL Actions workflow and `analyze` job prove execution, not
+successful findings. The separate [CodeQL findings check exposed by the Checks
+API](https://docs.github.com/en/rest/checks/runs?apiVersion=2022-11-28#list-check-runs-for-a-git-reference)
+does not expose its originating Actions run ID. The helper therefore binds it
+conservatively by exact SHA, name, app, suite, and a unique latest start no
+earlier than the selected analysis attempt. Missing, older-only, pending,
+ambiguous, malformed, failed, neutral, or skipped findings stop publication.
 
 GitHub generally suppresses workflow runs for events created with the repository
 `GITHUB_TOKEN` ([documented behavior](https://docs.github.com/en/actions/concepts/security/github_token)),

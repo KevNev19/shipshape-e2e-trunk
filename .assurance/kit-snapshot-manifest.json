@@ -14,6 +14,10 @@
       "sha256": "6a5f624f5308c127ac1ca15f831e3f2cd5c0488bb8ac4a7c9674cfa83a21a634",
       "mode": "100644"
     },
+    ".github/workflows/security-quality-report.yml": {
+      "sha256": "cc3f29c5214542c97e6697ea0ec03ad71a9f5488a35c9b06c3bc53557152c453",
+      "mode": "100644"
+    },
     ".gitignore": {
       "sha256": "fd22949eef6c9bb74fcca5d6200e35e712192fa365ee50fcb317d8b96fa93499",
       "mode": "100644"
@@ -143,7 +147,7 @@
       "mode": "100644"
     },
     "skills/shipshape-release/references/release-checklist.md": {
-      "sha256": "3f861dc6352c84486c48e9015cf46266f765251c53efa3a81e97dbae7babb87e",
+      "sha256": "5f62b8b9f6bf1383e0d392aac7cfcb8a0e04ed78a73a4792ecc913c143bd4376",
       "mode": "100644"
     },
     "skills/shipshape-review/SKILL.md": {
@@ -303,7 +307,7 @@
       "mode": "100644"
     },
     "templates/github/workflows/release.yml.tmpl": {
-      "sha256": "3f2bb71154df0aa362910dff8e8db6730af5990508131b351569d5f815cd9c73",
+      "sha256": "1e5dadc0627ce2ea787ed5d2f929ed3eae5f78ecfdf72c9a555c22ffdc9b3b76",
       "mode": "100644"
     },
     "templates/github/workflows/secret-scan.yml.tmpl": {
@@ -339,7 +343,7 @@
       "mode": "100644"
     },
     "templates/scripts/release-preflight.py.tmpl": {
-      "sha256": "124c7639415adacb27a8553b0ed13d0fa0ca564fee25fc85dd2ae758cc0f2978",
+      "sha256": "2eae3565f020b85170c62efb95e5d93f68cefcaa9f7418bf21b02083afdc2619",
       "mode": "100644"
     },
     "templates/scripts/review-gates.py.tmpl": {
@@ -359,7 +363,7 @@
       "mode": "100644"
     },
     "tests/conftest.py": {
-      "sha256": "0f3122a1e07c154a91bbb9050d4071c8bddb41c8fa0151b2181a06dc72f2f3fc",
+      "sha256": "6afce49fa7e944e6ef7dcaba46fcb5072cc7ef19c09ecead3d2a4dac1b238920",
       "mode": "100644"
     },
     "tests/e2e.sh": {
@@ -455,11 +459,11 @@
       "mode": "100644"
     },
     "tests/regressions.py": {
-      "sha256": "35f0b1c8c80f447413a0efe124f6bed0542aeab6a88ad919e7af53056d03e2ce",
+      "sha256": "b53a7f1bbf0037bcae1350ea2cea6ed7d7a27b5c8daf0167daa77642973517c2",
       "mode": "100644"
     },
     "tests/test_automerge_safety.py": {
-      "sha256": "08987369bc6a2706afc845b4651b231b27614289b007f82340c6e2217d21e7d7",
+      "sha256": "aae619f019dfe7ed9b80579d876ccf3ed109a069272468d590c13026d3d81b93",
       "mode": "100644"
     },
     "tests/test_bump_actions.py": {
@@ -507,7 +511,7 @@
       "mode": "100644"
     },
     "tests/test_release_preflight.py": {
-      "sha256": "1ef968e51745bc656745272f7f9cd41cd058f1032ed7690833b556a9dd3459fb",
+      "sha256": "7315d9bbf202549c1436ee86a61ce62ee7a2ccbf87ef1ab6654df69eb02fe748",
       "mode": "100644"
     },
     "tests/test_render.py": {
@@ -531,7 +535,7 @@
       "mode": "100644"
     },
     "tests/test_security_report.py": {
-      "sha256": "fa1e92d66c254f1d04e8aed2d19174bbdedab78473f56866a7de7806da4ed359",
+      "sha256": "30767521c8d556885ffed40a65e31c59fb1bcd92e8f6a5f789aa7ced3ce2ef7c",
       "mode": "100644"
     },
     "tests/test_setup_safety.py": {

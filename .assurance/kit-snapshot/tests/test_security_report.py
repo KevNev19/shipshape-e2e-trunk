@@ -101,6 +101,29 @@ def test_missing_repository_metadata_keeps_action_history_unknown(tmp_path):
     assert "History completeness is unknown" in report["body"]
 
 
+@pytest.mark.parametrize(
+    "repository",
+    [
+        {"full_name": "other/project", "default_branch": "untrusted-branch-marker"},
+        {
+            "full_name": "example/project",
+            "default_branch": {"unexpected": "untrusted-branch-marker"},
+        },
+    ],
+)
+def test_malformed_repository_metadata_is_not_echoed(tmp_path, repository):
+    responses = base_responses()
+    responses["repos/example/project"] = repository
+
+    report = security_report.collect_report(FakeGitHub(responses), "example/project", tmp_path)
+    serialized = json.dumps(report)
+
+    assert report["status"] == "incomplete"
+    assert report["default_branch"] == "unknown"
+    assert "untrusted-branch-marker" not in serialized
+    assert "repository metadata was unavailable" in serialized
+
+
 def test_alert_sections_paginate_until_a_short_page(tmp_path):
     responses = base_responses()
     first = "repos/example/project/code-scanning/alerts?state=open&per_page=100&page=1"

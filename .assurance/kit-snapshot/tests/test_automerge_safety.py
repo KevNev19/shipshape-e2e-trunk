@@ -1,7 +1,6 @@
 """Workflow-level regressions for automatic-merge authorization safety."""
 
 import base64
-import hashlib
 import json
 import os
 import re
@@ -146,8 +145,13 @@ def workflow_run_event():
 
 
 def git_blob_sha(content):
-    header = f"blob {len(content)}\0".encode()
-    return hashlib.sha1(header + content).hexdigest()
+    result = subprocess.run(
+        ["git", "hash-object", "--stdin"],
+        input=content,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout.decode().strip()
 
 
 def loader_responses(content, *, claimed_sha=None, encoded=None):

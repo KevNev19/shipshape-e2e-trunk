@@ -54,13 +54,14 @@ def render_fixture(fixture: str, root: Path, overrides: list[str] | None = None)
     return repo
 
 
-def run_focused_pytest(*nodeids: str) -> None:
+def run_focused_pytest(*nodeids: str, environment: dict[str, str] | None = None) -> None:
     """Run existing behavioral tests as dated regression evidence."""
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", *nodeids],
         cwd=ROOT,
         capture_output=True,
         text=True,
+        env=environment,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -313,27 +314,27 @@ def test_weekly_report_projects_alerts_and_paginates_pulls() -> None:
     class API:
         def __init__(self):
             self.calls = []
-            self.raw_secret = "fixture-" + "private-material"
-
-        def get(self, path: str):
-            self.calls.append(path)
-            if path == "repos/example/project":
-                return {"full_name": "example/project", "default_branch": "main"}
-            if "secret-scanning/alerts" in path:
-                return [
+            self.unretained_fixture_value = "fixture-" + "private-material"
+            self.responses = {
+                "repos/example/project": {
+                    "full_name": "example/project",
+                    "default_branch": "main",
+                },
+                "repos/example/project/code-scanning/alerts?state=open&per_page=100&page=1": [],
+                "repos/example/project/dependabot/alerts?state=open&per_page=100&page=1": [],
+                "repos/example/project/secret-scanning/alerts?state=open&per_page=100&page=1": [
                     {
                         "secret_type_display_name": "Synthetic token",
                         "html_url": "https://example.invalid/secret/1",
-                        "secret": self.raw_secret,
+                        "secret": self.unretained_fixture_value,
                         "future_api_field": "unretained",
                     }
-                ]
-            if "code-scanning/alerts" in path or "dependabot/alerts" in path:
-                return []
-            if "actions/runs" in path:
-                return {"workflow_runs": [], "total_count": 0}
-            if path.endswith("pulls?state=open&per_page=50&page=1"):
-                return [
+                ],
+                "repos/example/project/actions/runs?branch=main&per_page=20": {
+                    "workflow_runs": [],
+                    "total_count": 0,
+                },
+                "repos/example/project/pulls?state=open&per_page=50&page=1": [
                     {
                         "number": number,
                         "title": f"Pull {number}",
@@ -341,10 +342,13 @@ def test_weekly_report_projects_alerts_and_paginates_pulls() -> None:
                         "draft": False,
                     }
                     for number in range(1, 51)
-                ]
-            if path.endswith("pulls?state=open&per_page=50&page=2"):
-                return []
-            raise KeyError(path)
+                ],
+                "repos/example/project/pulls?state=open&per_page=50&page=2": [],
+            }
+
+        def get(self, path: str):
+            self.calls.append(path)
+            return self.responses[path]
 
     with tempfile.TemporaryDirectory() as tmp:
         api = API()
@@ -361,7 +365,7 @@ def test_weekly_report_projects_alerts_and_paginates_pulls() -> None:
     }
     assert sections["pull_requests"]["count"] == 50
     assert "repos/example/project/pulls?state=open&per_page=50&page=2" in api.calls
-    assert api.raw_secret not in json.dumps(report)
+    assert api.unretained_fixture_value not in json.dumps(report)
 
 
 def test_automatic_authority_uses_exact_gates_and_refuses_persistent_state() -> None:
@@ -721,6 +725,16 @@ def test_release_readiness_requires_registered_active_publisher() -> None:
     )
 
 
+def test_release_requires_successful_codeql_findings() -> None:
+    """2026-09-10: release readiness accepted a successful CodeQL Actions
+    run while its separate exact-candidate CodeQL findings check was failing."""
+    run_focused_pytest(
+        "tests/test_release_preflight.py::test_successful_codeql_analysis_does_not_override_failed_findings_check",
+        "tests/test_release_preflight.py::test_older_green_codeql_findings_do_not_satisfy_a_newer_analysis_attempt",
+        "tests/test_release_preflight.py::test_publish_and_postflight_require_successful_codeql_findings",
+    )
+
+
 def test_review03_automation_boundaries() -> None:
     """2026-09-10: broad documentation paths, partial GraphQL errors, and
     run-number ordering could incorrectly authorize automatic merging."""
@@ -767,6 +781,29 @@ def test_review03_guard_report_access_boundaries() -> None:
     )
     access_skill = ROOT / "skills" / "shipshape-access" / "SKILL.md"
     assert "protect <branch> <trunk|pr>" in access_skill.read_text()
+
+
+def test_doctor_tests_isolate_ambient_github_actions_mode() -> None:
+    """2026-09-10: hosted pytest inherited GITHUB_ACTIONS=true, so local-hook
+    tests accidentally exercised the doctor's explicit CI evidence mode."""
+    environment = os.environ.copy()
+    environment["GITHUB_ACTIONS"] = "true"
+    run_focused_pytest(
+        "tests/test_doctor.py::test_uninstalled_guard_is_fail_with_fix",
+        "tests/test_doctor.py::test_github_actions_reports_configuration_without_claiming_local_hook",
+        "tests/test_rendered_doctor.py::test_rendered_doctor_still_requires_local_hook_outside_ci",
+        "tests/test_rendered_doctor.py::test_rendered_doctor_accepts_secret_scan_in_ci_without_local_hook",
+        environment=environment,
+    )
+
+
+def test_weekly_report_rejects_untrusted_repository_metadata() -> None:
+    """2026-09-10: a path-insensitive synthetic API fixture made a raw alert
+    field appear able to become repository metadata and reach JSON stdout."""
+    run_focused_pytest(
+        "tests/test_security_report.py::test_alert_records_are_projected_through_section_allowlists",
+        "tests/test_security_report.py::test_malformed_repository_metadata_is_not_echoed",
+    )
 
 
 def main() -> int:
@@ -868,6 +905,10 @@ def main() -> int:
             test_release_readiness_requires_registered_active_publisher,
         ),
         (
+            "release requires successful CodeQL findings",
+            test_release_requires_successful_codeql_findings,
+        ),
+        (
             "review03 automation boundaries",
             test_review03_automation_boundaries,
         ),
@@ -878,6 +919,14 @@ def main() -> int:
         (
             "review03 guard/report/access boundaries",
             test_review03_guard_report_access_boundaries,
+        ),
+        (
+            "doctor tests isolate ambient GitHub Actions mode",
+            test_doctor_tests_isolate_ambient_github_actions_mode,
+        ),
+        (
+            "weekly report rejects untrusted repository metadata",
+            test_weekly_report_rejects_untrusted_repository_metadata,
         ),
     ]
     failures = 0

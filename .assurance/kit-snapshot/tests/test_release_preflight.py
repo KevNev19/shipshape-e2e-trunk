@@ -21,6 +21,8 @@ WORKFLOWS = {
 }
 ASSURANCE_WORKFLOWS = set(WORKFLOWS) - {".github/workflows/release.yml"}
 PUBLICATION_HELPER = ".sdlc/scripts/release-preflight.py"
+CODEQL_APP_ID = 57789
+CODEQL_CHECK_NAME = "CodeQL"
 
 
 def workflow_run_block(step_name: str) -> str:
@@ -128,6 +130,31 @@ def job_record(
     }
 
 
+def codeql_check_record(
+    sha: str,
+    *,
+    check_id: int = 9001,
+    suite_id: int = 9002,
+    app_id: int = CODEQL_APP_ID,
+    status: str = "completed",
+    conclusion: str | None = "success",
+    started_at: str = "2026-09-09T10:00:30Z",
+    completed_at: str | None = "2026-09-09T10:01:00Z",
+) -> dict:
+    return {
+        "id": check_id,
+        "name": CODEQL_CHECK_NAME,
+        "head_sha": sha,
+        "status": status,
+        "conclusion": conclusion,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "html_url": f"https://github.com/{REPOSITORY}/runs/{check_id}",
+        "app": {"id": app_id},
+        "check_suite": {"id": suite_id},
+    }
+
+
 def base_responses(
     sha: str,
     *,
@@ -196,6 +223,16 @@ def base_responses(
         responses[f"repos/{REPOSITORY}/actions/runs/{workflow_id * 10}/attempts/1/jobs"] = [
             {"total_count": 1, "jobs": [job_record(path, sha)]}
         ]
+    if ".github/workflows/codeql.yml" in enabled_paths:
+        check = codeql_check_record(sha)
+        responses[f"repos/{REPOSITORY}/commits/{sha}/check-runs"] = [
+            {"total_count": 1, "check_runs": [check]}
+        ]
+        responses[f"repos/{REPOSITORY}/check-suites/{check['check_suite']['id']}"] = {
+            "id": check["check_suite"]["id"],
+            "head_sha": sha,
+            "app": {"id": CODEQL_APP_ID},
+        }
     return responses
 
 
@@ -302,6 +339,12 @@ def test_rendered_helper_is_standalone_and_matches_kit_entrypoint(tmp_path):
     assert result.returncode == 0, payload
     assert payload["ok"] is True
     assert payload["candidate_sha"] == sha
+    assert {item["workflow"] for item in payload["workflow_runs"]} == {
+        "ci",
+        "secret_scan",
+        "codeql",
+    }
+    assert {item["path"] for item in payload["workflow_runs"]} == ASSURANCE_WORKFLOWS
     assert re.search(r"\{\{[A-Z0-9_]+\}\}", rendered.read_text()) is None
 
 
@@ -346,7 +389,7 @@ def test_green_unrelated_workflow_and_stale_ci_sha_are_not_evidence(tmp_path):
 def test_codeql_is_not_required_when_enabled_but_inapplicable_to_the_primary_language(tmp_path):
     repo, _, sha = make_repo(tmp_path)
 
-    result, payload, _ = run_preflight(
+    result, payload, calls = run_preflight(
         tmp_path,
         base_responses(sha, languages=["rust"]),
         "local",
@@ -360,6 +403,271 @@ def test_codeql_is_not_required_when_enabled_but_inapplicable_to_the_primary_lan
         ".github/workflows/ci.yml",
         ".github/workflows/secret-scan.yml",
     }
+    assert not any("/check-runs" in field for call in calls for field in call)
+
+
+def test_successful_codeql_analysis_does_not_override_failed_findings_check(tmp_path):
+    repo, _, sha = make_repo(tmp_path)
+    responses = base_responses(sha)
+    endpoint = f"repos/{REPOSITORY}/commits/{sha}/check-runs"
+    responses[endpoint][0]["check_runs"][0]["conclusion"] = "failure"
+
+    result, payload, calls = run_preflight(tmp_path, responses, "local", repo, "--repo", REPOSITORY)
+
+    assert result.returncode == 1
+    assert "codeql_findings_unsuccessful" in error_codes(payload)
+    check_calls = [call for call in calls if endpoint in call]
+    assert len(check_calls) == 1
+    assert "check_name=CodeQL" in check_calls[0]
+    assert f"app_id={CODEQL_APP_ID}" in check_calls[0]
+    assert "filter=all" in check_calls[0]
+
+
+def test_successful_codeql_findings_are_projected_as_release_evidence(tmp_path):
+    repo, _, sha = make_repo(tmp_path)
+
+    result, payload, calls = run_preflight(
+        tmp_path, base_responses(sha), "local", repo, "--repo", REPOSITORY
+    )
+
+    assert result.returncode == 0, payload
+    codeql = next(run for run in payload["workflow_runs"] if run["workflow"] == "codeql")
+    findings = codeql["findings_check"]
+    assert findings == {
+        "name": CODEQL_CHECK_NAME,
+        "app_id": CODEQL_APP_ID,
+        "check_run_id": 9001,
+        "check_suite_id": 9002,
+        "head_sha": sha,
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-09T10:00:30Z",
+        "completed_at": "2026-09-09T10:01:00Z",
+        "url": f"https://github.com/{REPOSITORY}/runs/9001",
+    }
+    assert "successful_codeql_findings" in payload["checks"]
+    assert any(f"repos/{REPOSITORY}/check-suites/9002" in call for call in calls)
+
+
+@pytest.mark.parametrize(
+    ("state", "expected_code"),
+    [
+        ("missing", "codeql_findings_absent"),
+        ("malformed", "incomplete_response"),
+        ("pending", "codeql_findings_pending"),
+        ("failed", "codeql_findings_unsuccessful"),
+        ("neutral", "codeql_findings_unsuccessful"),
+        ("skipped", "codeql_findings_unsuccessful"),
+    ],
+)
+def test_codeql_findings_must_be_present_well_formed_and_successful(tmp_path, state, expected_code):
+    repo, _, sha = make_repo(tmp_path)
+    responses = base_responses(sha)
+    endpoint = f"repos/{REPOSITORY}/commits/{sha}/check-runs"
+    check = responses[endpoint][0]["check_runs"][0]
+    if state == "missing":
+        responses[endpoint] = [{"total_count": 0, "check_runs": []}]
+    elif state == "malformed":
+        del check["started_at"]
+    elif state == "pending":
+        check.update(status="in_progress", conclusion=None, completed_at=None)
+    else:
+        check["conclusion"] = {
+            "failed": "failure",
+            "neutral": "neutral",
+            "skipped": "skipped",
+        }[state]
+
+    result, payload, _ = run_preflight(tmp_path, responses, "local", repo, "--repo", REPOSITORY)
+
+    assert result.returncode == 1, state
+    assert expected_code in error_codes(payload)
+    assert payload["next_action"]
+
+
+@pytest.mark.parametrize(
+    ("location", "field", "value"),
+    [
+        ("check", "head_sha", "f" * 40),
+        ("check", "name", "CodeQL / Analyze"),
+        ("check_app", "id", 15368),
+        ("suite", "head_sha", "f" * 40),
+        ("suite_app", "id", 15368),
+    ],
+)
+def test_codeql_findings_require_exact_head_and_advanced_security_app(
+    tmp_path, location, field, value
+):
+    repo, _, sha = make_repo(tmp_path)
+    responses = base_responses(sha)
+    endpoint = f"repos/{REPOSITORY}/commits/{sha}/check-runs"
+    check = responses[endpoint][0]["check_runs"][0]
+    suite = responses[f"repos/{REPOSITORY}/check-suites/9002"]
+    target = {
+        "check": check,
+        "check_app": check["app"],
+        "suite": suite,
+        "suite_app": suite["app"],
+    }[location]
+    target[field] = value
+
+    result, payload, _ = run_preflight(tmp_path, responses, "local", repo, "--repo", REPOSITORY)
+
+    assert result.returncode == 1, location
+    assert "codeql_findings_identity_mismatch" in error_codes(payload)
+
+
+def test_tied_latest_codeql_findings_chronology_fails_closed(tmp_path):
+    repo, _, sha = make_repo(tmp_path)
+    responses = base_responses(sha)
+    endpoint = f"repos/{REPOSITORY}/commits/{sha}/check-runs"
+    first = responses[endpoint][0]["check_runs"][0]
+    second = codeql_check_record(
+        sha,
+        check_id=9003,
+        suite_id=9004,
+        conclusion="failure",
+        started_at=first["started_at"],
+    )
+    responses[endpoint] = [{"total_count": 2, "check_runs": [first, second]}]
+
+    result, payload, _ = run_preflight(tmp_path, responses, "local", repo, "--repo", REPOSITORY)
+
+    assert result.returncode == 1
+    assert "codeql_findings_chronology_ambiguous" in error_codes(payload)
+    assert set(payload["errors"][0]["check_run_ids"]) == {9001, 9003}
+
+
+@pytest.mark.parametrize("failure", ["api", "malformed_json", "pagination", "suite_api"])
+def test_codeql_findings_api_and_pagination_fail_closed(tmp_path, failure):
+    repo, _, sha = make_repo(tmp_path)
+    responses = base_responses(sha)
+    endpoint = f"repos/{REPOSITORY}/commits/{sha}/check-runs"
+    if failure == "api":
+        responses[endpoint] = {"__exit__": 1}
+        expected = "github_api_error"
+    elif failure == "malformed_json":
+        responses[endpoint] = {"__raw__": "not-json"}
+        expected = "github_api_malformed"
+    elif failure == "suite_api":
+        responses[f"repos/{REPOSITORY}/check-suites/9002"] = {"__exit__": 1}
+        expected = "github_api_error"
+    else:
+        responses[endpoint][0]["total_count"] = 2
+        expected = "incomplete_response"
+
+    result, payload, _ = run_preflight(tmp_path, responses, "local", repo, "--repo", REPOSITORY)
+
+    assert result.returncode == 1, failure
+    assert expected in error_codes(payload)
+
+
+def test_older_green_codeql_findings_do_not_satisfy_a_newer_analysis_attempt(tmp_path):
+    repo, _, sha = make_repo(tmp_path)
+    responses = base_responses(sha)
+    codeql_runs = responses[f"repos/{REPOSITORY}/actions/workflows/103/runs"]
+    codeql_runs[0]["workflow_runs"][0]["run_started_at"] = "2026-09-09T11:00:00Z"
+
+    result, payload, _ = run_preflight(tmp_path, responses, "local", repo, "--repo", REPOSITORY)
+
+    assert result.returncode == 1
+    assert "codeql_findings_absent" in error_codes(payload)
+    assert payload["errors"][0]["analysis_run_id"] == 1030
+
+
+def test_later_failed_codeql_findings_override_older_green_evidence(tmp_path):
+    repo, _, sha = make_repo(tmp_path)
+    responses = base_responses(sha)
+    endpoint = f"repos/{REPOSITORY}/commits/{sha}/check-runs"
+    older_green = responses[endpoint][0]["check_runs"][0]
+    later_failed = codeql_check_record(
+        sha,
+        check_id=9003,
+        suite_id=9004,
+        conclusion="failure",
+        started_at="2026-09-09T10:02:00Z",
+        completed_at="2026-09-09T10:03:00Z",
+    )
+    responses[endpoint] = [{"total_count": 2, "check_runs": [older_green, later_failed]}]
+    responses[f"repos/{REPOSITORY}/check-suites/9004"] = {
+        "id": 9004,
+        "head_sha": sha,
+        "app": {"id": CODEQL_APP_ID},
+    }
+
+    result, payload, _ = run_preflight(tmp_path, responses, "local", repo, "--repo", REPOSITORY)
+
+    assert result.returncode == 1
+    assert "codeql_findings_unsuccessful" in error_codes(payload)
+    assert payload["errors"][0]["check_run_id"] == 9003
+
+
+def test_later_green_codeql_findings_override_older_failed_evidence(tmp_path):
+    repo, _, sha = make_repo(tmp_path)
+    responses = base_responses(sha)
+    endpoint = f"repos/{REPOSITORY}/commits/{sha}/check-runs"
+    older_failed = responses[endpoint][0]["check_runs"][0]
+    older_failed["conclusion"] = "failure"
+    later_green = codeql_check_record(
+        sha,
+        check_id=9003,
+        suite_id=9004,
+        started_at="2026-09-09T10:02:00Z",
+        completed_at="2026-09-09T10:03:00Z",
+    )
+    responses[endpoint] = [{"total_count": 2, "check_runs": [older_failed, later_green]}]
+    responses[f"repos/{REPOSITORY}/check-suites/9004"] = {
+        "id": 9004,
+        "head_sha": sha,
+        "app": {"id": CODEQL_APP_ID},
+    }
+
+    result, payload, _ = run_preflight(tmp_path, responses, "local", repo, "--repo", REPOSITORY)
+
+    assert result.returncode == 0, payload
+    codeql = next(run for run in payload["workflow_runs"] if run["workflow"] == "codeql")
+    assert codeql["findings_check"]["check_run_id"] == 9003
+
+
+def test_disabled_codeql_does_not_require_a_findings_check(tmp_path):
+    repo, _, sha = make_repo(tmp_path)
+
+    result, payload, calls = run_preflight(
+        tmp_path,
+        base_responses(sha, codeql=False),
+        "local",
+        repo,
+        "--repo",
+        REPOSITORY,
+    )
+
+    assert result.returncode == 0, payload
+    assert "successful_codeql_findings" not in payload["checks"]
+    assert not any("/check-runs" in field for call in calls for field in call)
+
+
+@pytest.mark.parametrize("mode", ["publish", "verify-release"])
+def test_publish_and_postflight_require_successful_codeql_findings(tmp_path, mode):
+    _, _, sha = make_repo(tmp_path)
+    responses = base_responses(sha)
+    add_remote_tag(responses, "v1.0.0", sha)
+    endpoint = f"repos/{REPOSITORY}/commits/{sha}/check-runs"
+    responses[endpoint][0]["check_runs"][0]["conclusion"] = "failure"
+
+    result, payload, _ = run_preflight(
+        tmp_path,
+        responses,
+        mode,
+        "--repo",
+        REPOSITORY,
+        "--tag",
+        "v1.0.0",
+        "--candidate",
+        sha,
+    )
+
+    assert result.returncode == 1, mode
+    assert "codeql_findings_unsuccessful" in error_codes(payload)
 
 
 @pytest.mark.parametrize(
@@ -924,9 +1232,11 @@ def test_verify_release_binds_the_exact_tag_run_and_release(tmp_path):
 
 def test_release_workflow_executes_trusted_preflight_before_publishing():
     workflow = WORKFLOW_TEMPLATE.read_text()
+    permissions = workflow.split("\npermissions:\n", 1)[1].split("\njobs:\n", 1)[0]
 
     assert "actions/checkout" not in workflow
-    assert "contents: write" in workflow
+    assert permissions == "  actions: read\n  checks: read\n  contents: write\n"
+    assert "checks: write" not in workflow
     assert ".sdlc/scripts/release-preflight.py" in workflow
     assert "--paginate" not in workflow
     assert '--candidate "$GITHUB_SHA"' in workflow
